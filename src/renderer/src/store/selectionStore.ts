@@ -14,6 +14,7 @@ export const defaultActionItems: ActionItem[] = [
     searchEngine: 'Google|https://www.google.com/search?q={{queryString}}'
   },
   { id: 'copy', name: 'selection.action.builtin.copy', enabled: true, isBuiltIn: true, icon: 'clipboard-copy' },
+  { id: 'typo-check', name: 'selection.action.builtin.typo-check', enabled: true, isBuiltIn: true, icon: 'spell-check' },
   { id: 'refine', name: 'selection.action.builtin.refine', enabled: false, isBuiltIn: true, icon: 'wand-sparkles' },
   { id: 'quote', name: 'selection.action.builtin.quote', enabled: false, isBuiltIn: true, icon: 'quote' }
 ]

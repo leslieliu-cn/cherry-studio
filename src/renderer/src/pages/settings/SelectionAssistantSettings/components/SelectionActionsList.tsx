@@ -45,8 +45,19 @@ const SelectionActionsList: FC<SelectionActionsListProps> = ({ actionItems, setA
     MAX_ENABLED_ITEMS
   } = useActionItems(actionItems, setActionItems)
 
+  // Auto-merge missing built-in actions with existing user configuration
   if (!actionItems || actionItems.length === 0) {
     setActionItems(defaultActionItems)
+  } else {
+    // Check if any new built-in actions are missing and add them
+    const existingIds = new Set(actionItems.map((item) => item.id))
+    const missingBuiltInActions = defaultActionItems.filter((defaultItem) => !existingIds.has(defaultItem.id))
+
+    if (missingBuiltInActions.length > 0) {
+      // Add missing built-in actions to the existing list
+      const updatedActionItems = [...actionItems, ...missingBuiltInActions]
+      setActionItems(updatedActionItems)
+    }
   }
 
   return (

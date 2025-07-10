@@ -14,6 +14,7 @@ import styled from 'styled-components'
 
 import ActionGeneral from './components/ActionGeneral'
 import ActionTranslate from './components/ActionTranslate'
+import ActionTypoCheck from './components/ActionTypoCheck'
 
 const SelectionActionApp: FC = () => {
   const { language, customCss } = useSettings()
@@ -242,7 +243,8 @@ const SelectionActionApp: FC = () => {
       <MainContainer>
         <Content ref={contentElementRef}>
           {action.id == 'translate' && <ActionTranslate action={action} scrollToBottom={handleScrollToBottom} />}
-          {action.id != 'translate' && <ActionGeneral action={action} scrollToBottom={handleScrollToBottom} />}
+          {action.id == 'typo-check' && <ActionTypoCheck action={action} scrollToBottom={handleScrollToBottom} />}
+          {action.id != 'translate' && action.id != 'typo-check' && <ActionGeneral action={action} scrollToBottom={handleScrollToBottom} />}
         </Content>
       </MainContainer>
     </WindowFrame>
