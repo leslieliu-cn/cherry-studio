@@ -95,8 +95,8 @@ export class SelectionService {
   private TOOLBAR_WIDTH = 350
   private TOOLBAR_HEIGHT = 43
 
-  private readonly ACTION_WINDOW_WIDTH = 500
-  private readonly ACTION_WINDOW_HEIGHT = 400
+  private readonly ACTION_WINDOW_WIDTH = 800
+  private readonly ACTION_WINDOW_HEIGHT = 800
 
   private lastActionWindowSize: { width: number; height: number } = {
     width: this.ACTION_WINDOW_WIDTH,
