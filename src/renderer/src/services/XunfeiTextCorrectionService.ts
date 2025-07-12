@@ -51,7 +51,7 @@ class XunfeiTextCorrectionService {
       appid: 'cdd271ea',
       apisecret: 'ZTI3M2M5OGEzZGIyMDE3NTRkMjRiYTFl',
       apikey: '0d157c977578dc087cc98f505ffba070',
-      url: 'https://api.xf-yun.com/v1/private/s9a87e3ec',
+      url: 'https://xfyun.htianxia.com/v1/private/s9a87e3ec',
       maxLength: 2000
     }
   }
