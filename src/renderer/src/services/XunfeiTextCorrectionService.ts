@@ -1,30 +1,8 @@
-// 使用Web Crypto API替代Node.js crypto模块
-
-// 讯飞文本纠错API配置
-interface XunfeiConfig {
-  appid: string
-  apisecret: string
-  apikey: string
-  url: string
+// 文本纠错服务配置
+interface TextCorrectionConfig {
+  apiUrl: string
   maxLength: number
-}
-
-// API响应接口
-interface XunfeiResponse {
-  code: number
-  message: string
-  sid: string
-  header: {
-    code: number
-    message: string
-    sid: string
-    status: number
-  }
-  payload?: {
-    result: {
-      text: string // Base64编码的JSON字符串
-    }
-  }
+  authToken?: string
 }
 
 // 检测结果接口
@@ -44,256 +22,114 @@ export interface TextCorrectionResult {
 }
 
 class XunfeiTextCorrectionService {
-  private config: XunfeiConfig
+  private config: TextCorrectionConfig
 
   constructor() {
     this.config = {
-      appid: 'cdd271ea',
-      apisecret: 'ZTI3M2M5OGEzZGIyMDE3NTRkMjRiYTFl',
-      apikey: '0d157c977578dc087cc98f505ffba070',
-      url: 'https://xfyun.htianxia.com/v1/private/s9a87e3ec',
-      maxLength: 2000
+      apiUrl: 'https://xfyun.htianxia.com/api/text-correction/check-texts',
+      maxLength: 2000,
+      authToken: '5f56ed6fdb0493ecef90f9e5'
     }
   }
 
   /**
-   * 生成讯飞API所需的认证URL
+   * 将文本按照空格、标点符号或段落分割为数组，每段不超过指定长度
    */
-  private async generateAuthUrl(method: string, baseUrl: string): Promise<string> {
-    const parsedUrl = new URL(baseUrl)
-    const host = parsedUrl.host
-    const path = parsedUrl.pathname
-
-    // 生成RFC1123格式的日期
-    const now = new Date()
-    const date = now.toUTCString()
-
-    // 构建签名字符串 - 注意格式要严格按照讯飞要求
-    const signatureOrigin = `host: ${host}\ndate: ${date}\n${method.toUpperCase()} ${path} HTTP/1.1`
-
-    // 使用Web Crypto API生成HMAC-SHA256签名
-    const encoder = new TextEncoder()
-    const keyData = encoder.encode(this.config.apisecret)
-    const messageData = encoder.encode(signatureOrigin)
-
-    const cryptoKey = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-
-    const signatureBuffer = await crypto.subtle.sign('HMAC', cryptoKey, messageData)
-    const signatureSha = this.arrayBufferToBase64(signatureBuffer)
-
-    // 构建authorization原始字符串
-    const authorizationOrigin = `api_key="${this.config.apikey}", algorithm="hmac-sha256", headers="host date request-line", signature="${signatureSha}"`
-    const authorization = btoa(authorizationOrigin)
-
-    // 构建URL参数
-    const params = new URLSearchParams({
-      host: host,
-      date: date,
-      authorization: authorization
-    })
-
-    return `${baseUrl}?${params.toString()}`
-  }
-
-  /**
-   * 将ArrayBuffer转换为Base64字符串
-   */
-  private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i])
+  private splitText(text: string, maxLength: number = this.config.maxLength): string[] {
+    if (text.length <= maxLength) {
+      return [text]
     }
-    return btoa(binary)
-  }
 
-  /**
-   * 正确解码包含中文字符的Base64字符串
-   */
-  private base64DecodeUTF8(base64: string): string {
-    try {
-      // 使用atob解码Base64
-      const binaryString = atob(base64)
+    const chunks: string[] = []
 
-      // 将二进制字符串转换为字节数组
-      const bytes = new Uint8Array(binaryString.length)
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i)
-      }
+    // 首先按段落分割（换行符）
+    const paragraphs = text.split(/\n+/)
 
-      // 使用TextDecoder正确解码UTF-8
-      const decoder = new TextDecoder('utf-8')
-      return decoder.decode(bytes)
-    } catch (error) {
-      console.error('Base64解码失败:', error)
-      // 如果解码失败，尝试直接使用atob
-      return atob(base64)
-    }
-  }
+    for (const paragraph of paragraphs) {
+      if (paragraph.length <= maxLength) {
+        chunks.push(paragraph)
+      } else {
+        // 如果段落太长，按句子分割（句号、问号、感叹号）
+        const sentences = paragraph.split(/([。！？.!?]+)/)
+        let currentChunk = ''
 
-  /**
-   * 调用讯飞文本纠错API
-   */
-  async checkText(text: string): Promise<TextCorrectionResult> {
-    try {
-      // 检查文本长度
-      if (text.length > this.config.maxLength) {
-        return {
-          success: false,
-          originalText: text,
-          message: `文本长度超过限制，最大支持${this.config.maxLength}个字符`
-        }
-      }
+        for (let i = 0; i < sentences.length; i += 2) {
+          const sentence = sentences[i] + (sentences[i + 1] || '')
 
-      if (!text.trim()) {
-        return {
-          success: false,
-          originalText: text,
-          message: '文本内容不能为空'
-        }
-      }
+          if ((currentChunk + sentence).length <= maxLength) {
+            currentChunk += sentence
+          } else {
+            if (currentChunk) {
+              chunks.push(currentChunk.trim())
+              currentChunk = sentence
+            } else {
+              // 如果单个句子就超过长度，按逗号分割
+              const parts = sentence.split(/([，,;；]+)/)
+              let subChunk = ''
 
-      // 构建请求体 - 严格按照Python代码格式
-      const requestBody = {
-        header: {
-          app_id: this.config.appid,
-          status: 3
-        },
-        parameter: {
-          s9a87e3ec: {
-            result: {
-              encoding: 'utf8',
-              compress: 'raw',
-              format: 'json'
+              for (let j = 0; j < parts.length; j += 2) {
+                const part = parts[j] + (parts[j + 1] || '')
+
+                if ((subChunk + part).length <= maxLength) {
+                  subChunk += part
+                } else {
+                  if (subChunk) {
+                    chunks.push(subChunk.trim())
+                    subChunk = part
+                  } else {
+                    // 最后按空格分割
+                    const words = part.split(/\s+/)
+                    let wordChunk = ''
+
+                    for (const word of words) {
+                      if ((wordChunk + ' ' + word).length <= maxLength) {
+                        wordChunk += (wordChunk ? ' ' : '') + word
+                      } else {
+                        if (wordChunk) {
+                          chunks.push(wordChunk.trim())
+                          wordChunk = word
+                        } else {
+                          // 如果单个词都超过长度，强制截断
+                          chunks.push(word.substring(0, maxLength))
+                          if (word.length > maxLength) {
+                            wordChunk = word.substring(maxLength)
+                          }
+                        }
+                      }
+                    }
+
+                    if (wordChunk) {
+                      subChunk = wordChunk
+                    }
+                  }
+                }
+              }
+
+              if (subChunk) {
+                currentChunk = subChunk
+              }
             }
           }
-        },
-        payload: {
-          input: {
-            encoding: 'utf8',
-            compress: 'raw',
-            format: 'plain',
-            status: 3,
-            text: btoa(unescape(encodeURIComponent(text)))
-          }
-        }
-      }
-
-      const bodyString = JSON.stringify(requestBody)
-      const authUrl = await this.generateAuthUrl('POST', this.config.url)
-
-      console.log('讯飞API请求参数:', {
-        url: authUrl,
-        headers: {
-          'Content-Type': 'application/json',
-          host: 'api.xf-yun.com',
-          app_id: this.config.appid
-        },
-        payload: requestBody
-      })
-
-      // 发送请求 - 使用带认证参数的URL，添加必要的请求头
-      const response = await fetch(authUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          host: 'api.xf-yun.com',
-          app_id: this.config.appid
-        },
-        body: bodyString
-      })
-
-      console.log('讯飞API响应状态:', response.status, response.statusText)
-
-      if (!response.ok) {
-        throw new Error(`HTTP错误: ${response.status} ${response.statusText}`)
-      }
-
-      const result: XunfeiResponse = await response.json()
-      console.log('讯飞API原始响应数据:', result)
-
-      // 处理API响应
-      if (result.header.code !== 0) {
-        let errorMessage = result.message || '检测失败'
-
-        // 处理特定错误码
-        if (result.header.code === 11201) {
-          errorMessage = '讯飞API授权不足：每日调用次数已达上限(500次)，请联系管理员或等待次日重置'
-        } else if (result.header.code === 10105) {
-          errorMessage = '讯飞API认证失败：请检查AppID、APIKey和APISecret配置是否正确'
-        } else if (result.header.code === 10110) {
-          errorMessage = '讯飞API授权许可不足：请检查应用授权状态或联系讯飞客服'
         }
 
-        return {
-          success: false,
-          originalText: text,
-          message: errorMessage
+        if (currentChunk) {
+          chunks.push(currentChunk.trim())
         }
-      }
-
-      // 根据Python demo，需要解析payload.result.text中的Base64编码数据
-      if (!result.payload?.result?.text) {
-        console.log('未找到纠错结果，payload结构:', result.payload)
-        return {
-          success: true,
-          originalText: text,
-          correctedText: text,
-          corrections: [],
-          message: '未发现明显的敏感词汇或不当表达'
-        }
-      }
-
-      console.log('Base64编码的text字段:', result.payload.result.text)
-
-      // 解码Base64编码的结果 - 修复中文乱码问题
-      const decodedText = this.base64DecodeUTF8(result.payload.result.text)
-      console.log('Base64解码后的文本:', decodedText)
-
-      const correctionResult = JSON.parse(decodedText)
-      console.log('解析后的纠错结果:', correctionResult)
-
-      // 解析纠错结果
-      const corrections = this.parseCorrections(correctionResult)
-      console.log('提取的纠错信息:', corrections)
-
-      const correctedText = this.applyCorrections(text, corrections)
-      console.log('修正后的文本:', correctedText)
-
-      return {
-        success: true,
-        originalText: text,
-        correctedText,
-        corrections,
-        message: corrections.length > 0 ? '发现需要修正的内容' : '未发现明显的敏感词汇或不当表达'
-      }
-    } catch (error) {
-      console.error('讯飞API调用失败:', error)
-      console.error('错误详情:', {
-        name: error instanceof Error ? error.name : 'Unknown',
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      })
-      return {
-        success: false,
-        originalText: text,
-        message: error instanceof Error ? error.message : '检测服务暂时不可用'
       }
     }
+
+    return chunks.filter((chunk) => chunk.trim().length > 0)
   }
 
   /**
-   * 解析讯飞API返回的纠错结果
+   * 合并多个检测结果
    */
-  private parseCorrections(correctionResult: any): Array<{
-    original: string
-    corrected: string
-    position: number
-    type: string
-    confidence: number
-    description: string
-  }> {
-    const corrections: Array<{
+  private mergeResults(
+    originalText: string,
+    results: TextCorrectionResult[],
+    textChunks: string[]
+  ): TextCorrectionResult {
+    const allCorrections: Array<{
       original: string
       corrected: string
       position: number
@@ -302,115 +138,149 @@ class XunfeiTextCorrectionService {
       description: string
     }> = []
 
-    // 根据Python代码中的错误类型处理
-    const errorTypes = [
-      'black_list',
-      'pol',
-      'char',
-      'word',
-      'redund',
-      'miss',
-      'order',
-      'dapei',
-      'punc',
-      'idm',
-      'org',
-      'leader',
-      'number',
-      'addr',
-      'name',
-      'grammar_pc'
-    ]
+    let correctedText = originalText
+    let currentPosition = 0
+    let hasErrors = false
 
-    for (const errorType of errorTypes) {
-      if (correctionResult[errorType] && Array.isArray(correctionResult[errorType])) {
-        for (const error of correctionResult[errorType]) {
-          if (Array.isArray(error) && error.length >= 4) {
-            const pos = error[0] // 错误位置
-            const cur = error[1] // 当前错误的词
-            const correct = error[2] // 建议修改的词
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      const chunk = textChunks[i]
 
-            corrections.push({
-              original: cur,
-              corrected: correct,
-              position: pos,
-              type: errorType,
-              confidence: 1.0, // 讯飞API没有置信度，设为1.0
-              description: this.getTypeDescription(errorType)
-            })
-          }
+      if (!result.success) {
+        hasErrors = true
+        continue
+      }
+
+      if (result.corrections && result.corrections.length > 0) {
+        // 调整位置偏移
+        const adjustedCorrections = result.corrections.map((correction) => ({
+          ...correction,
+          position: correction.position + currentPosition
+        }))
+
+        allCorrections.push(...adjustedCorrections)
+      }
+
+      // 更新当前位置
+      currentPosition += chunk.length + 1 // +1 for potential separator
+    }
+
+    // 应用所有修正
+    if (allCorrections.length > 0) {
+      // 按位置倒序排列，从后往前替换，避免位置偏移
+      const sortedCorrections = allCorrections.sort((a, b) => b.position - a.position)
+
+      for (const correction of sortedCorrections) {
+        const start = correction.position
+        const end = start + correction.original.length
+        if (start >= 0 && end <= correctedText.length) {
+          correctedText = correctedText.substring(0, start) + correction.corrected + correctedText.substring(end)
         }
       }
     }
 
-    return corrections
+    return {
+      success: !hasErrors,
+      originalText,
+      correctedText: allCorrections.length > 0 ? correctedText : originalText,
+      corrections: allCorrections,
+      message: hasErrors
+        ? '部分文本检测失败'
+        : allCorrections.length > 0
+          ? '发现需要修正的内容'
+          : '未发现明显的敏感词汇或不当表达'
+    }
   }
 
   /**
-   * 应用纠错建议生成修正后的文本
+   * 调用文本纠错API
    */
-  private applyCorrections(
-    originalText: string,
-    corrections: Array<{
-      original: string
-      corrected: string
-      position: number
-      type: string
-      confidence: number
-      description: string
-    }>
-  ): string {
-    if (corrections.length === 0) {
-      return originalText
-    }
+  async checkText(text: string): Promise<TextCorrectionResult> {
+    try {
+      if (!text.trim()) {
+        return {
+          success: false,
+          originalText: text,
+          message: '文本内容不能为空'
+        }
+      }
 
-    // 按位置倒序排列，从后往前替换，避免位置偏移
-    const sortedCorrections = corrections.sort((a, b) => b.position - a.position)
-    let correctedText = originalText
+      // 将文本分割为多个片段
+      const textChunks = this.splitText(text)
 
-    for (const correction of sortedCorrections) {
-      const start = correction.position
-      const end = start + correction.original.length
-      if (start >= 0 && end <= correctedText.length) {
-        correctedText = correctedText.substring(0, start) + correction.corrected + correctedText.substring(end)
+      // 调用外部API接口，发送文本数组
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      }
+
+      // 如果有认证token，添加Authorization头部
+      if (this.config.authToken) {
+        headers['Authorization'] = `Bearer ${this.config.authToken}`
+      }
+
+      const response = await fetch(this.config.apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ texts: textChunks })
+      })
+
+      if (!response.ok) {
+        let errorMessage = `HTTP错误: ${response.status} ${response.statusText}`
+        try {
+          const errorData = await response.json()
+          if (errorData.error || errorData.message) {
+            errorMessage = errorData.error || errorData.message
+          }
+        } catch {
+          // 如果无法解析错误响应，使用默认错误消息
+        }
+        throw new Error(errorMessage)
+      }
+
+      const responseData = await response.json()
+
+      // 检查响应格式
+      if (!responseData) {
+        throw new Error('API返回空响应')
+      }
+
+      // 如果API直接返回数组
+      let results: TextCorrectionResult[]
+      if (Array.isArray(responseData)) {
+        results = responseData
+      } else if (responseData.results && Array.isArray(responseData.results)) {
+        // 如果API返回包装的对象
+        results = responseData.results
+      } else if (responseData.data && Array.isArray(responseData.data)) {
+        // 另一种可能的包装格式
+        results = responseData.data
+      } else {
+        throw new Error('API返回的数据格式不正确')
+      }
+
+      if (!results || results.length === 0) {
+        return {
+          success: false,
+          originalText: text,
+          message: '未收到有效的检测结果'
+        }
+      }
+
+      // 验证结果数量是否匹配
+      if (results.length !== textChunks.length) {
+        console.warn(`API返回的结果数量(${results.length})与发送的文本片段数量(${textChunks.length})不匹配`)
+      }
+
+      // 合并所有结果
+      return this.mergeResults(text, results, textChunks)
+    } catch (error) {
+      console.error('文本纠错API调用失败:', error)
+      return {
+        success: false,
+        originalText: text,
+        message: error instanceof Error ? error.message : '检测服务暂时不可用'
       }
     }
-
-    return correctedText
-  }
-
-  /**
-   * 获取错误类型的中文描述
-   */
-  private getTypeDescription(type: string): string {
-    const typeMap: Record<string, string> = {
-      black_list: '黑名单纠错',
-      pol: '政治术语纠错',
-      char: '别字纠错',
-      word: '别词纠错',
-      redund: '语法纠错-冗余',
-      miss: '语法纠错-缺失',
-      order: '语法纠错-乱序',
-      dapei: '搭配纠错',
-      punc: '标点纠错',
-      idm: '成语纠错',
-      org: '机构名纠错',
-      leader: '领导人职称纠错',
-      number: '数字纠错',
-      addr: '地名纠错',
-      name: '全文人名纠错',
-      grammar_pc: '句式杂糅&语义重复',
-      // 兼容旧的类型
-      sensitive: '敏感词汇',
-      inappropriate: '不当表达',
-      offensive: '冒犯性内容',
-      political: '政治敏感',
-      violence: '暴力内容',
-      adult: '成人内容',
-      spam: '垃圾信息',
-      other: '其他风险内容'
-    }
-    return typeMap[type] || '未知错误类型'
   }
 
   /**
@@ -446,4 +316,8 @@ class XunfeiTextCorrectionService {
   }
 }
 
+// 导出类供用户创建实例
+export { XunfeiTextCorrectionService }
+
+// 导出默认实例（无认证token）
 export default new XunfeiTextCorrectionService()
